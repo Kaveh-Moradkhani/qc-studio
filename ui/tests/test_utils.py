@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 import pytest
 
+import utils.data_loaders as data_loaders
 from utils.config import parse_qc_config
 from utils.data_loaders import (
     load_mri_data,
@@ -49,6 +51,11 @@ class TestParseQcConfig:
                 "overlay_mri_image_path": str(temp_dir / "overlay.nii.gz"),
                 "svg_montage_path": [str(temp_dir / "montage.svg")],
                 "iqm_path": str(temp_dir / "iqm.json"),
+                "surface_path": [
+                    str(temp_dir / "lh.white"),
+                    str(temp_dir / "rh.white"),
+                ],
+                "surface_reference_mri_image_path": str(temp_dir / "orig.mgz"),
             }
         }
         config_path = temp_dir / "qc_config.json"
@@ -60,6 +67,11 @@ class TestParseQcConfig:
         assert "base_mri_image_path" in result
         assert "montage_path" in result
         assert result["base_mri_image_path"] is not None
+        assert result["surface_path"] == [
+            temp_dir / "lh.white",
+            temp_dir / "rh.white",
+        ]
+        assert result["surface_reference_mri_image_path"] == temp_dir / "orig.mgz"
         assert "montage_max_rows" in result
         assert "montage_max_cols" in result
         assert result["montage_max_rows"] is None
@@ -107,6 +119,8 @@ class TestParseQcConfig:
         assert result["overlay_mri_image_path"] is None
         assert result["montage_path"] is None
         assert result["iqm_path"] is None
+        assert result["surface_path"] is None
+        assert result["surface_reference_mri_image_path"] is None
         assert result["montage_max_rows"] is None
         assert result["montage_max_cols"] is None
         assert result["display_name"] is None
@@ -187,6 +201,191 @@ class TestLoadMriData:
         result = load_mri_data(path_dict)
 
         assert result == {}
+
+
+class TestSurfaceData:
+    """Test cortical-surface geometry loading and coordinate transforms."""
+
+    @staticmethod
+    def _fake_image(affine, vox2ras_tkr=None):
+        class Header:
+            def get_vox2ras_tkr(self):
+                if vox2ras_tkr is None:
+                    raise AttributeError("No vox2ras_tkr")
+                return vox2ras_tkr
+
+        class Image:
+            pass
+
+        image = Image()
+        image.affine = np.asarray(affine, dtype=float)
+        image.header = Header()
+        return image
+
+    def test_transform_surface_vertices_to_target_voxels(self):
+        """Surface RAS is mapped through FreeSurfer scanner RAS to target voxels."""
+        vertices = np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [10.0, 20.0, 30.0],
+            ]
+        )
+
+        vox2ras_tkr = np.eye(4)
+        reference_affine = np.eye(4)
+        reference_affine[:3, 3] = [1.0, 2.0, 3.0]
+
+        target_affine = np.eye(4)
+        target_affine[:3, 3] = [-4.0, -5.0, -6.0]
+
+        reference_img = self._fake_image(
+            reference_affine,
+            vox2ras_tkr,
+        )
+        target_img = self._fake_image(target_affine)
+
+        world, target_voxels = data_loaders._transform_surface_vertices(
+            vertices,
+            reference_img,
+            target_img,
+        )
+
+        np.testing.assert_allclose(
+            world,
+            [
+                [1.0, 2.0, 3.0],
+                [11.0, 22.0, 33.0],
+            ],
+        )
+        np.testing.assert_allclose(
+            target_voxels,
+            [
+                [5.0, 7.0, 9.0],
+                [15.0, 27.0, 39.0],
+            ],
+        )
+
+    def test_load_surface_data_from_dataset_relative_paths(
+        self,
+        temp_dir,
+        monkeypatch,
+    ):
+        """Surface and MRI paths are resolved relative to dataset_dir."""
+        surface_dir = temp_dir / "derivatives" / "freesurfer" / "sub-01" / "surf"
+        mri_dir = temp_dir / "derivatives" / "freesurfer" / "sub-01" / "mri"
+        anat_dir = temp_dir / "bids" / "sub-01" / "anat"
+
+        surface_dir.mkdir(parents=True)
+        mri_dir.mkdir(parents=True)
+        anat_dir.mkdir(parents=True)
+
+        lh_white = surface_dir / "lh.white"
+        rh_white = surface_dir / "rh.white"
+        reference_mri = mri_dir / "orig.mgz"
+        target_mri = anat_dir / "sub-01_T1w.nii.gz"
+
+        for path in [
+            lh_white,
+            rh_white,
+            reference_mri,
+            target_mri,
+        ]:
+            path.write_bytes(b"test")
+
+        vertices = np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        )
+        faces = np.asarray([[0, 1, 2]], dtype=np.int32)
+
+        def fake_read_geometry(path):
+            assert Path(path) in {lh_white, rh_white}
+            return vertices.copy(), faces.copy()
+
+        reference_img = self._fake_image(
+            np.eye(4),
+            np.eye(4),
+        )
+        target_img = self._fake_image(np.eye(4))
+
+        def fake_load(path):
+            path = Path(path)
+            if path == reference_mri:
+                return reference_img
+            if path == target_mri:
+                return target_img
+            raise AssertionError(f"Unexpected MRI path: {path}")
+
+        monkeypatch.setattr(
+            "nibabel.freesurfer.io.read_geometry",
+            fake_read_geometry,
+        )
+        monkeypatch.setattr(
+            "nibabel.load",
+            fake_load,
+        )
+
+        path_dict = {
+            "surface_path": [
+                Path("derivatives/freesurfer/" "sub-01/surf/lh.white"),
+                Path("derivatives/freesurfer/" "sub-01/surf/rh.white"),
+            ],
+            "surface_reference_mri_image_path": Path("derivatives/freesurfer/" "sub-01/mri/orig.mgz"),
+            "base_mri_image_path": Path("bids/sub-01/anat/sub-01_T1w.nii.gz"),
+        }
+
+        result = data_loaders.load_surface_data(
+            temp_dir,
+            path_dict,
+        )
+
+        assert result["surface_reference_mri_image_path"] == reference_mri
+        assert result["target_mri_image_path"] == target_mri
+
+        surfaces = result["surfaces"]
+        assert len(surfaces) == 2
+        assert [surface["name"] for surface in surfaces] == [
+            "lh.white",
+            "rh.white",
+        ]
+        assert [surface["path"] for surface in surfaces] == [
+            lh_white,
+            rh_white,
+        ]
+
+        for surface in surfaces:
+            np.testing.assert_array_equal(
+                surface["faces"],
+                faces,
+            )
+            np.testing.assert_allclose(
+                surface["vertices_surface_ras"],
+                vertices,
+            )
+            np.testing.assert_allclose(
+                surface["vertices_world"],
+                vertices,
+            )
+            np.testing.assert_allclose(
+                surface["vertices_voxel"],
+                vertices,
+            )
+
+    def test_load_surface_data_returns_empty_without_required_paths(
+        self,
+        temp_dir,
+    ):
+        """Missing surface/reference/target configuration produces no data."""
+        assert (
+            data_loaders.load_surface_data(
+                temp_dir,
+                {},
+            )
+            == {}
+        )
 
 
 class TestLoadMontageData:

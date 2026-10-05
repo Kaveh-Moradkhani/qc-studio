@@ -122,13 +122,24 @@ class TestQCTask:
         overlay_path = temp_dir / "overlay.nii.gz"
         montage_path = temp_dir / "montage.svg"
         iqm_path = temp_dir / "iqm.json"
+        surface_path = temp_dir / "lh.white"
+        surface_reference_path = temp_dir / "orig.mgz"
 
-        task = QCTask(base_mri_image_path=base_path, overlay_mri_image_path=overlay_path, montage_path=montage_path, iqm_path=iqm_path)
+        task = QCTask(
+            base_mri_image_path=base_path,
+            overlay_mri_image_path=overlay_path,
+            montage_path=montage_path,
+            iqm_path=iqm_path,
+            surface_path=surface_path,
+            surface_reference_mri_image_path=surface_reference_path,
+        )
 
         assert task.base_mri_image_path == base_path
         assert task.overlay_mri_image_path == overlay_path
         assert task.montage_path == [montage_path]
         assert task.iqm_path == [iqm_path]
+        assert task.surface_path == [surface_path]
+        assert task.surface_reference_mri_image_path == surface_reference_path
 
     def test_create_qc_task_with_minimal_fields(self):
         """Test creating QCTask with minimal fields."""
@@ -138,6 +149,8 @@ class TestQCTask:
         assert task.overlay_mri_image_path is None
         assert task.montage_path is None
         assert task.iqm_path is None
+        assert task.surface_path is None
+        assert task.surface_reference_mri_image_path is None
         assert task.montage_max_rows is None
         assert task.montage_max_cols is None
 
@@ -149,6 +162,21 @@ class TestQCTask:
 
         # Should be converted to Path object
         assert isinstance(task.base_mri_image_path, Path)
+
+    def test_qc_task_surface_path_coercion(self, temp_dir):
+        """Surface paths accept either one path or a list of paths."""
+        single_path = temp_dir / "lh.white"
+        task = QCTask(surface_path=str(single_path))
+        assert task.surface_path == [single_path]
+
+        surface_paths = [
+            temp_dir / "lh.white",
+            temp_dir / "lh.pial",
+            temp_dir / "rh.white",
+            temp_dir / "rh.pial",
+        ]
+        task = QCTask(surface_path=[str(path) for path in surface_paths])
+        assert task.surface_path == surface_paths
 
     def test_qc_task_serialization(self, temp_dir):
         """Test QCTask serialization."""

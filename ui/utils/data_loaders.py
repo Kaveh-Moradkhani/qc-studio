@@ -55,6 +55,135 @@ def _resolve_under_dataset(base_root: Path, rel_path: Union[str, Path, None]) ->
     return matches[0] if matches else None
 
 
+def _transform_surface_vertices(vertices, reference_img, target_img):
+    """Transform FreeSurfer surface-RAS vertices into target MRI coordinates.
+
+    FreeSurfer surface vertices are expressed in tkReg/surface RAS. The
+    reference FreeSurfer MRI supplies both scanner-RAS (``affine``) and
+    tkReg-RAS (``vox2ras_tkr``) transforms. Vertices are first mapped to
+    scanner/world RAS and then into voxel coordinates of the MRI displayed
+    for QC.
+
+    Args:
+        vertices: Array-like of shape (N, 3) containing surface-RAS vertices.
+        reference_img: FreeSurfer reference MRI loaded by nibabel.
+        target_img: MRI displayed for QC, loaded by nibabel.
+
+    Returns:
+        Tuple ``(vertices_world, vertices_voxel)`` with both arrays shaped
+        ``(N, 3)``.
+    """
+    import numpy as np
+
+    vertices = np.asarray(vertices, dtype=float)
+    if vertices.ndim != 2 or vertices.shape[1] != 3:
+        raise ValueError("Surface vertices must have shape (N, 3)")
+
+    reference_affine = np.asarray(reference_img.affine, dtype=float)
+    vox2ras_tkr = np.asarray(
+        reference_img.header.get_vox2ras_tkr(),
+        dtype=float,
+    )
+    target_affine = np.asarray(target_img.affine, dtype=float)
+
+    surface_to_world = reference_affine @ np.linalg.inv(vox2ras_tkr)
+
+    vertices_h = np.column_stack(
+        [
+            vertices,
+            np.ones(vertices.shape[0], dtype=float),
+        ]
+    )
+
+    vertices_world = (surface_to_world @ vertices_h.T).T[:, :3]
+
+    world_h = np.column_stack(
+        [
+            vertices_world,
+            np.ones(vertices_world.shape[0], dtype=float),
+        ]
+    )
+
+    vertices_voxel = (np.linalg.inv(target_affine) @ world_h.T).T[:, :3]
+
+    return vertices_world, vertices_voxel
+
+
+def load_surface_data(
+    dataset_dir: Union[str, Path],
+    path_dict: dict,
+) -> dict:
+    """Load cortical surfaces and map them into the displayed MRI space.
+
+    ``surface_path`` may contain one or more dataset-relative surface paths.
+    ``surface_reference_mri_image_path`` identifies the FreeSurfer MRI whose
+    geometry defines the surfaces' tkReg/surface-RAS coordinates.
+    ``base_mri_image_path`` is the MRI displayed to the QC rater.
+
+    Returns an empty dictionary when required configured inputs cannot be
+    resolved.
+    """
+    import nibabel as nib
+    from nibabel.freesurfer.io import read_geometry
+
+    base_root = Path(dataset_dir) if dataset_dir else Path()
+
+    surface_paths = _expand_dataset_paths(
+        base_root,
+        path_dict.get("surface_path"),
+    )
+    reference_mri_path = _resolve_under_dataset(
+        base_root,
+        path_dict.get("surface_reference_mri_image_path"),
+    )
+    target_mri_path = _resolve_under_dataset(
+        base_root,
+        path_dict.get("base_mri_image_path"),
+    )
+
+    if not surface_paths or reference_mri_path is None or target_mri_path is None:
+        return {}
+
+    try:
+        reference_img = nib.load(str(reference_mri_path))
+        target_img = nib.load(str(target_mri_path))
+    except (OSError, ValueError):
+        return {}
+
+    surfaces = []
+
+    for surface_path in surface_paths:
+        try:
+            vertices, faces = read_geometry(str(surface_path))
+            vertices_world, vertices_voxel = _transform_surface_vertices(
+                vertices,
+                reference_img,
+                target_img,
+            )
+        except (OSError, ValueError):
+            continue
+
+        surfaces.append(
+            {
+                "name": surface_path.name,
+                "path": surface_path,
+                "vertices_surface_ras": vertices,
+                "vertices_world": vertices_world,
+                "vertices_voxel": vertices_voxel,
+                "faces": faces,
+            }
+        )
+
+    if not surfaces:
+        return {}
+
+    return {
+        "surface_reference_mri_image_path": reference_mri_path,
+        "target_mri_image_path": target_mri_path,
+        "surfaces": surfaces,
+    }
+
+
 def _nifti_volume_to_bytes(img, vol_index: int = 0) -> bytes:
     """Serialize one 3D volume from a NIfTI image (handles 4D via mmap slice)."""
     import numpy as np
