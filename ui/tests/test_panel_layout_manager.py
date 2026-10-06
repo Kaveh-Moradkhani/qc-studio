@@ -128,7 +128,7 @@ class TestPanelVisibility:
 
     def test_panel_config_keys_exist(self):
         """Test that PANEL_CONFIG has expected keys."""
-        expected_keys = ["niivue", "montage", "iqm"]
+        expected_keys = ["niivue", "montage", "iqm", "surface"]
         for key in expected_keys:
             assert key in PANEL_CONFIG
 
@@ -144,6 +144,7 @@ class TestPanelVisibility:
         assert PANEL_CONFIG["niivue"]["default"] is True
         assert PANEL_CONFIG["montage"]["default"] is True
         assert PANEL_CONFIG["iqm"]["default"] is False
+        assert PANEL_CONFIG["surface"]["default"] is False
 
 
 class TestLayoutConstants:

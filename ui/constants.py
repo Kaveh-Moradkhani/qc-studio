@@ -17,13 +17,23 @@ SCREEN_SIZES = [
 ]
 
 # Default panel selections
-DEFAULT_PANELS = {"niivue": True, "montage": True, "iqm": False}
+DEFAULT_PANELS = {
+    "niivue": True,
+    "montage": True,
+    "iqm": False,
+    "surface": False,
+}
 
 # Panel configuration metadata
 PANEL_CONFIG = {
     "niivue": {"label": "🧠 3D MRI Viewer (Niivue)", "description": "Display interactive 3D MRI viewer", "default": True},
     "montage": {"label": "📊 Montage", "description": "Display 2D image montage visualization", "default": True},
     "iqm": {"label": "📈 QC Metrics", "description": "Display QC metrics panel", "default": False},
+    "surface": {
+        "label": "🧠 Cortical Surface QC",
+        "description": "Display cortical surfaces as contours on MRI slices",
+        "default": False,
+    },
 }
 
 # QC rating options

@@ -23,6 +23,7 @@ def patched_layout(monkeypatch):
     monkeypatch.setattr(qc_viewer, "display_iqm_distribution_panel", MagicMock())
     monkeypatch.setattr(qc_viewer, "_display_niivue_with_secondary_panel", MagicMock())
     monkeypatch.setattr(qc_viewer, "_display_niivue_full_width", MagicMock())
+    monkeypatch.setattr(qc_viewer, "display_surface_qc_panel", MagicMock())
     monkeypatch.setattr(qc_viewer, "_display_qc_rating_for_task", MagicMock())
     monkeypatch.setattr(qc_viewer, "_render_autoplay_countdown_main_banner", MagicMock())
     monkeypatch.setattr(qc_viewer.st, "subheader", MagicMock())
@@ -75,3 +76,100 @@ def test_neither_renders_when_no_niivue_image_and_nothing_selected(patched_layou
 
     patched_layout._display_montage_panel.assert_not_called()
     patched_layout.display_iqm_distribution_panel.assert_not_called()
+
+
+def test_surface_panel_renders_when_selected_and_configured(
+    patched_layout,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        patched_layout,
+        "parse_qc_config",
+        lambda *a, **k: {
+            "display_name": "Task",
+            "base_mri_image_path": "anat/T1w.nii.gz",
+            "surface_path": ["surf/lh.white"],
+            "surface_reference_mri_image_path": "mri/wm.mgz",
+        },
+    )
+
+    _call(
+        {
+            "niivue": False,
+            "montage": False,
+            "iqm": False,
+            "surface": True,
+        }
+    )
+
+    patched_layout.display_surface_qc_panel.assert_called_once()
+
+
+def test_surface_panel_does_not_render_when_not_selected(
+    patched_layout,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        patched_layout,
+        "parse_qc_config",
+        lambda *a, **k: {
+            "display_name": "Task",
+            "base_mri_image_path": "anat/T1w.nii.gz",
+            "surface_path": ["surf/lh.white"],
+            "surface_reference_mri_image_path": "mri/wm.mgz",
+        },
+    )
+
+    _call(
+        {
+            "niivue": False,
+            "montage": False,
+            "iqm": False,
+            "surface": False,
+        }
+    )
+
+    patched_layout.display_surface_qc_panel.assert_not_called()
+
+
+def test_surface_panel_requires_surface_configuration(
+    patched_layout,
+):
+    _call(
+        {
+            "niivue": False,
+            "montage": False,
+            "iqm": False,
+            "surface": True,
+        }
+    )
+
+    patched_layout.display_surface_qc_panel.assert_not_called()
+
+
+def test_surface_panel_can_render_with_existing_panel(
+    patched_layout,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        patched_layout,
+        "parse_qc_config",
+        lambda *a, **k: {
+            "display_name": "Task",
+            "base_mri_image_path": "anat/T1w.nii.gz",
+            "surface_path": ["surf/lh.white"],
+            "surface_reference_mri_image_path": "mri/wm.mgz",
+        },
+    )
+
+    _call(
+        {
+            "niivue": False,
+            "montage": True,
+            "iqm": False,
+            "surface": True,
+        }
+    )
+
+    patched_layout._display_montage_panel.assert_called_once()
+    patched_layout.display_surface_qc_panel.assert_called_once()

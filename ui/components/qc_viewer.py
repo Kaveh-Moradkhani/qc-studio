@@ -29,6 +29,7 @@ from managers.niivue_viewer_manager import NiivueViewerManager, NiivueViewerConf
 from managers.session_manager import SessionManager
 from models import QCRecord
 from components.iqm_viewer import _display_iqm_panel as display_iqm_distribution_panel
+from components.surface_viewer import display_surface_qc_panel
 
 AUTOPLAY_RUN_CTX_KEY = "_autoplay_run_ctx"
 QC_SAVE_PATH_KEY = "qc_save_path"
@@ -238,11 +239,13 @@ def display_qc_viewers(
         "niivue": selected_panels.get("niivue_col", selected_panels.get("niivue", True)),
         "montage": selected_panels.get("montage_col", selected_panels.get("montage", True)),
         "iqm": selected_panels.get("iqm_col", selected_panels.get("iqm", False)),
+        "surface": selected_panels.get("surface", False),
     }
 
     show_niivue = selected_panels.get("niivue", True)
     show_montage = selected_panels.get("montage", True)
     show_iqm = selected_panels.get("iqm", False)
+    show_surface = selected_panels.get("surface", False)
 
     _render_autoplay_countdown_main_banner()
 
@@ -255,6 +258,13 @@ def display_qc_viewers(
             st.divider()
         st.subheader(display_label)
         task_has_niivue = show_niivue and bool(qc_config.get("base_mri_image_path"))
+        task_has_surface = (
+            show_surface
+            and bool(qc_config.get("base_mri_image_path"))
+            and bool(qc_config.get("surface_path"))
+            and bool(qc_config.get("surface_reference_mri_image_path"))
+        )
+
         if task_has_niivue and show_montage and show_iqm:
             _display_niivue_with_secondary_panel(
                 dataset_dir,
@@ -294,6 +304,18 @@ def display_qc_viewers(
                 participant_id,
                 session_id,
                 dataset_dir,
+            )
+
+        if task_has_surface:
+            if task_has_niivue or show_montage or show_iqm:
+                st.divider()
+
+            display_surface_qc_panel(
+                dataset_dir,
+                qc_config,
+                participant_id=participant_id,
+                session_id=session_id,
+                task_suffix=tname,
             )
 
         _display_qc_rating_for_task(

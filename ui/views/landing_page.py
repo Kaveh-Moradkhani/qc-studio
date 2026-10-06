@@ -454,9 +454,10 @@ def _display_panel_layout_preview(selected_panels: dict) -> None:
     show_niivue = selected_panels.get("niivue", False)
     show_montage = selected_panels.get("montage", False)
     show_iqm = selected_panels.get("iqm", False)
+    show_surface = selected_panels.get("surface", False)
 
     # No panels selected
-    if not (show_niivue or show_montage or show_iqm):
+    if not (show_niivue or show_montage or show_iqm or show_surface):
         st.info("👉 Select panels above to see the layout preview")
         return
 
@@ -495,6 +496,14 @@ def _display_panel_layout_preview(selected_panels: dict) -> None:
     elif show_iqm:
         st.write("**Layout:** Full-width (QC Metrics)")
         st.info("📈 **QC Metrics**\n\nQC metrics will be displayed across the full width")
+
+    if show_surface:
+        if show_niivue or show_montage or show_iqm:
+            st.write("**Additional full-width panel:** Cortical Surface QC")
+        else:
+            st.write("**Layout:** Full-width (Cortical Surface QC)")
+
+        st.info("🧠 **Cortical Surface QC**\n\n" "MRI slices with cortical-surface contours will be " "displayed across the full width")
 
 
 def _display_montage_settings() -> None:
