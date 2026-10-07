@@ -9,6 +9,11 @@ import streamlit as st
 
 from utils.data_loaders import load_surface_data
 from utils.surface_geometry import mesh_slice_segments
+from utils.surface_qc_metrics import (
+    COLLISION_PAIRS,
+    SURFACE_KEYS,
+    compute_surface_geometry_qc,
+)
 
 
 # ---------------------------------------------------------------------
@@ -70,6 +75,23 @@ SURFACE_STYLES = {
         "label": "Right pial",
         "color": "#FF00FF",
     },
+}
+
+
+SURFACE_METRIC_LABELS = {
+    "lh_white": "Left white",
+    "lh_pial": "Left pial",
+    "rh_white": "Right white",
+    "rh_pial": "Right pial",
+}
+
+COLLISION_PAIR_LABELS = {
+    "white_pial_left": "Left white ↔ left pial",
+    "white_pial_right": "Right white ↔ right pial",
+    "pial_lr": "Left pial ↔ right pial",
+    "white_lr": "Left white ↔ right white",
+    "cross_lhwhite_rhpial": "Left white ↔ right pial",
+    "cross_rhwhite_lhpial": "Right white ↔ left pial",
 }
 
 
@@ -313,7 +335,7 @@ def _build_slice_figure(
             "x": 0.5,
         },
         showlegend=False,
-        height=520,
+        height=420,
     )
 
     figure.update_xaxes(
@@ -345,7 +367,7 @@ def _load_surface_qc_data(
     dataset_dir,
     qc_config,
 ):
-    """Load and cache MRI volume and cortical-surface geometry."""
+    """Load and cache MRI volume, cortical surfaces, and geometry diagnostics."""
     surface_data = load_surface_data(
         dataset_dir,
         qc_config,
@@ -360,9 +382,29 @@ def _load_surface_qc_data(
 
     volume = np.asanyarray(target_img.dataobj)
 
+    try:
+        geometry_qc = compute_surface_geometry_qc(
+            surface_data["surfaces"],
+        )
+    except Exception as error:
+        # Quantitative diagnostics must not prevent visual QC if a backend or
+        # malformed mesh fails unexpectedly. Surface the failure explicitly.
+        geometry_qc = {
+            "status": "error",
+            "error": repr(error),
+            "missing_surfaces": [],
+            "surfaces": {},
+            "pairs": {},
+            "collision_pct_union_mean4": None,
+            "collision_pct_union_max4": None,
+            "collision_faces_union_sum4": None,
+            "collision_exact_all_pairs": False,
+        }
+
     return {
         "surface_data": surface_data,
         "volume": volume,
+        "geometry_qc": geometry_qc,
     }
 
 
@@ -483,6 +525,121 @@ def _display_surface_plane(
 
 
 # ---------------------------------------------------------------------
+# Quantitative geometry diagnostics
+# ---------------------------------------------------------------------
+
+
+def _rounded_pct(value):
+    """Round a percentage for display while preserving unavailable values."""
+    if value is None:
+        return None
+    return round(float(value), 4)
+
+
+def _surface_metric_rows(geometry_qc: dict) -> list[dict]:
+    """Build display rows for per-surface SIF and collision-union metrics."""
+    surface_results = geometry_qc.get("surfaces", {})
+    rows = []
+
+    for surface_key in SURFACE_KEYS:
+        surface = surface_results.get(surface_key, {})
+        sif = surface.get("sif", {})
+        collision = surface.get("collision", {})
+        collision_available = bool(collision.get("available", False))
+
+        rows.append(
+            {
+                "Surface": SURFACE_METRIC_LABELS[surface_key],
+                "Self-intersecting faces": sif.get("face_count"),
+                "SIF (%)": _rounded_pct(sif.get("pct")),
+                "Colliding faces (union)": (collision.get("face_count") if collision_available else None),
+                "Collision union (%)": (_rounded_pct(collision.get("pct")) if collision_available else None),
+                "Collision exact": (bool(collision.get("exact")) if collision_available else None),
+            }
+        )
+
+    return rows
+
+
+def _collision_pair_rows(geometry_qc: dict) -> list[dict]:
+    """Build display rows for the six SimCortex-compatible collision pairs."""
+    pair_results = geometry_qc.get("pairs", {})
+    rows = []
+
+    for pair_name in COLLISION_PAIRS:
+        pair = pair_results.get(pair_name, {})
+        detected = pair.get("collision_detected")
+
+        if detected is True:
+            detected_text = "Yes"
+        elif detected is False:
+            detected_text = "No"
+        else:
+            detected_text = "Unavailable"
+
+        rows.append(
+            {
+                "Surface pair": COLLISION_PAIR_LABELS[pair_name],
+                "Collision": detected_text,
+                "Contacts": pair.get("num_contacts"),
+                "Faces A (%)": _rounded_pct(pair.get("pct_faces_A")),
+                "Faces B (%)": _rounded_pct(pair.get("pct_faces_B")),
+                "Exact": (bool(pair.get("contact_count_exact")) if detected in (True, False) else None),
+                "Status": pair.get("status", "unavailable"),
+            }
+        )
+
+    return rows
+
+
+def _display_surface_geometry_metrics(geometry_qc: dict) -> None:
+    """Render numerical SIF and raw surface-contact diagnostics."""
+    st.subheader("Surface integrity metrics")
+
+    status = geometry_qc.get("status", "unknown")
+    error = geometry_qc.get("error", "")
+
+    if status != "OK":
+        message = f"Geometry diagnostics status: {status}."
+        if error:
+            message += f" {error}"
+        st.warning(message)
+
+    st.dataframe(
+        _surface_metric_rows(geometry_qc),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    mean4 = geometry_qc.get("collision_pct_union_mean4")
+    max4 = geometry_qc.get("collision_pct_union_max4")
+    exact = geometry_qc.get("collision_exact_all_pairs", False)
+
+    mean_text = "unavailable" if mean4 is None else f"{float(mean4):.4f}%"
+    max_text = "unavailable" if max4 is None else f"{float(max4):.4f}%"
+
+    st.caption("Raw case collision union — " f"mean: {mean_text} · max: {max_text} · " f"all pair counts exact: {'yes' if exact else 'no'}")
+
+    with st.expander(
+        "Pairwise surface contacts",
+        expanded=False,
+    ):
+        st.dataframe(
+            _collision_pair_rows(geometry_qc),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    st.caption(
+        "SIF is the percentage of faces flagged self-intersecting by "
+        "PyMeshLab. Collision values are raw geometric contacts. Depending "
+        "on the surface definition, coincident medial-wall white/pial faces "
+        "may contribute. These diagnostics inform, but do not automatically "
+        "determine, the PASS/FAIL/UNCERTAIN rating."
+    )
+
+
+# ---------------------------------------------------------------------
 # Main Surface QC panel
 # ---------------------------------------------------------------------
 
@@ -551,3 +708,11 @@ def display_surface_qc_panel(
             )
 
     st.caption("Yellow: left white · " "Red: left pial · " "Cyan: right white · " "Magenta: right pial")
+
+    geometry_qc = cached_data.get("geometry_qc")
+
+    if geometry_qc:
+        st.divider()
+        _display_surface_geometry_metrics(
+            geometry_qc,
+        )
