@@ -227,6 +227,17 @@ def _build_slice_figure(
         slice_position,
     )
 
+    # Display sagittal slices rotated 90 degrees clockwise.
+    # This is a presentation transform only; the underlying voxel and
+    # surface coordinates remain unchanged.
+    sagittal_source_height = None
+    if axis == 0:
+        sagittal_source_height = int(image.shape[0])
+        image = np.rot90(
+            image,
+            k=-1,
+        )
+
     figure = go.Figure()
 
     # MRI background
@@ -257,6 +268,22 @@ def _build_slice_figure(
             segments,
             axis,
         )
+
+        if axis == 0:
+            rotated_x = []
+            rotated_y = []
+
+            for x_value, y_value in zip(x, y):
+                if x_value is None or y_value is None:
+                    rotated_x.append(None)
+                    rotated_y.append(None)
+                    continue
+
+                rotated_x.append(sagittal_source_height - 1 - float(y_value))
+                rotated_y.append(float(x_value))
+
+            x = rotated_x
+            y = rotated_y
 
         style = _surface_style(surface["name"])
 
