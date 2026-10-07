@@ -539,9 +539,20 @@ def _on_notes_change(participant_id, session_id, qc_pipeline, qc_task, rver, nve
 
 
 def _toggle_notes_editing_for_task(qc_task: str) -> None:
-    """Reveal the notes box for editing and pause autoplay until the user resumes manually."""
-    st.session_state[_notes_edit_mode_key(qc_task)] = True
-    _pause_autoplay_for_notes_edit()
+    """Toggle notes editing and pause autoplay when editing begins."""
+    key = _notes_edit_mode_key(qc_task)
+
+    editing = not bool(
+        st.session_state.get(
+            key,
+            False,
+        )
+    )
+
+    st.session_state[key] = editing
+
+    if editing:
+        _pause_autoplay_for_notes_edit()
 
 
 def _display_qc_rating_for_task(
@@ -580,9 +591,13 @@ def _display_qc_rating_for_task(
     action_col, notes_col = st.columns([2, 6])
     with action_col:
         st.caption("Autoplay will be paused when you add notes. Notes are saved when you continue with rating or navigation.")
-        if st.button("Add notes" if not notes_editable else "Edit notes", key=f"_toggle_notes_{qc_task}_{nver}", use_container_width=True):
-            _toggle_notes_editing_for_task(qc_task)
-            st.rerun()
+        st.button(
+            "Done editing" if notes_editable else "Add / edit notes",
+            key=f"_toggle_notes_{qc_task}_{nver}",
+            use_container_width=True,
+            on_click=_toggle_notes_editing_for_task,
+            args=(qc_task,),
+        )
     with notes_col:
         st.text_area(
             MESSAGES["qc_notes_prompt"],

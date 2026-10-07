@@ -18,6 +18,7 @@ from components.qc_viewer import (
     AUTOPLAY_ADVANCE_GRACE_SECONDS,
     _on_rating_change,
     _on_notes_change,
+    _toggle_notes_editing_for_task,
     _record_qc_for_current_participant,
     _rating_widget_key,
     _notes_widget_key,
@@ -1497,3 +1498,22 @@ class TestAutoplayCountdownTiming:
         _render_autoplay_countdown_main_banner()
 
         mock_html.assert_not_called()
+
+
+def test_notes_edit_mode_can_be_enabled_and_disabled(
+    autoplay_session_state,
+):
+    state, _ = autoplay_session_state
+
+    state["autoplay_enabled"] = True
+    state["autoplay_start_time"] = 123.0
+
+    _toggle_notes_editing_for_task("anat_wf_qc")
+
+    assert state["_notes_edit_mode_anat_wf_qc"] is True
+    assert state["autoplay_enabled"] is False
+    assert state["autoplay_start_time"] == 0.0
+
+    _toggle_notes_editing_for_task("anat_wf_qc")
+
+    assert state["_notes_edit_mode_anat_wf_qc"] is False
