@@ -166,3 +166,65 @@ def test_plane_names_match_lia_voxel_axes():
         1: "Axial",
         2: "Coronal",
     }
+
+
+def test_step_surface_slice_moves_one_slice(monkeypatch):
+    from components import surface_viewer
+
+    state = {"test_slice": 10}
+
+    monkeypatch.setattr(
+        surface_viewer.st,
+        "session_state",
+        state,
+    )
+
+    surface_viewer._step_surface_slice(
+        "test_slice",
+        default_position=10,
+        step=1,
+        max_position=20,
+    )
+
+    assert state["test_slice"] == 11
+
+    surface_viewer._step_surface_slice(
+        "test_slice",
+        default_position=10,
+        step=-1,
+        max_position=20,
+    )
+
+    assert state["test_slice"] == 10
+
+
+def test_step_surface_slice_clamps_to_volume(monkeypatch):
+    from components import surface_viewer
+
+    state = {"test_slice": 0}
+
+    monkeypatch.setattr(
+        surface_viewer.st,
+        "session_state",
+        state,
+    )
+
+    surface_viewer._step_surface_slice(
+        "test_slice",
+        default_position=0,
+        step=-1,
+        max_position=20,
+    )
+
+    assert state["test_slice"] == 0
+
+    state["test_slice"] = 20
+
+    surface_viewer._step_surface_slice(
+        "test_slice",
+        default_position=20,
+        step=1,
+        max_position=20,
+    )
+
+    assert state["test_slice"] == 20

@@ -347,6 +347,29 @@ def _load_surface_qc_data(
 # ---------------------------------------------------------------------
 
 
+def _step_surface_slice(
+    slider_key: str,
+    default_position: int,
+    step: int,
+    max_position: int,
+) -> None:
+    """Move a surface-QC slice backward or forward by one step."""
+    current_position = int(
+        st.session_state.get(
+            slider_key,
+            default_position,
+        )
+    )
+
+    st.session_state[slider_key] = max(
+        0,
+        min(
+            max_position,
+            current_position + step,
+        ),
+    )
+
+
 @st.fragment
 def _display_surface_plane(
     volume,
@@ -356,14 +379,63 @@ def _display_surface_plane(
     subject_key: str,
 ):
     """Render one independently updating cortical-surface QC plane."""
-    slice_position = st.slider(
-        PLANE_NAMES[axis],
-        min_value=0,
-        max_value=(int(volume.shape[axis]) - 1),
-        value=default_position,
-        step=1,
-        key=(f"surface_slice_" f"{axis}_" f"{subject_key}"),
+    max_position = int(volume.shape[axis]) - 1
+
+    slider_key = f"surface_slice_" f"{axis}_" f"{subject_key}"
+
+    current_position = int(
+        st.session_state.get(
+            slider_key,
+            default_position,
+        )
     )
+
+    st.markdown(f"**{PLANE_NAMES[axis]}**")
+
+    previous_col, slider_col, next_col = st.columns([1.1, 7.8, 1.1])
+
+    with previous_col:
+        st.button(
+            " ",
+            icon=":material/chevron_left:",
+            key=(f"surface_previous_" f"{axis}_" f"{subject_key}"),
+            help="Previous slice",
+            disabled=current_position <= 0,
+            on_click=_step_surface_slice,
+            args=(
+                slider_key,
+                default_position,
+                -1,
+                max_position,
+            ),
+        )
+
+    with slider_col:
+        slice_position = st.slider(
+            PLANE_NAMES[axis],
+            min_value=0,
+            max_value=max_position,
+            value=default_position,
+            step=1,
+            key=slider_key,
+            label_visibility="collapsed",
+        )
+
+    with next_col:
+        st.button(
+            " ",
+            icon=":material/chevron_right:",
+            key=(f"surface_next_" f"{axis}_" f"{subject_key}"),
+            help="Next slice",
+            disabled=current_position >= max_position,
+            on_click=_step_surface_slice,
+            args=(
+                slider_key,
+                default_position,
+                1,
+                max_position,
+            ),
+        )
 
     figure = _build_slice_figure(
         volume,
